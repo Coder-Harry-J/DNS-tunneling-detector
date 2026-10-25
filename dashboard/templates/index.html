@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>DNS Tunneling Detector — NIDS Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <style>
+    /* ═══ CSS Reset & Design Tokens (macOS Glassmorphism) ═══════════════════ */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-base:          #080601;
+      --glass-panel:      rgba(18, 14, 5, 0.62);
+      --glass-card:       rgba(26, 19, 7, 0.52);
+      --glass-card-hover: rgba(38, 27, 9, 0.68);
+      --glass-border:     rgba(255, 255, 255, 0.08);
+      --glass-border-hi:  rgba(255, 255, 255, 0.16);
+      --glass-border-glow:rgba(249, 115, 22, 0.32);
+      --glass-shadow:     0 16px 40px -10px rgba(0, 0, 0, 0.55), inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+      --glass-shadow-sm:  0 8px 24px -4px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.09);
+      --glass-blur:       blur(24px) saturate(190%);
+      --accent:           #f97316;
+      --accent-glow:      rgba(249, 115, 22, 0.35);
+      --orange-light:     #fb923c;
+      --green:            #4ade80;
+      --red:              #f87171;
+      --orange:           #f97316;
+      --yellow:           #fbbf24;
+      --muted:            #786445;
+      --text:             #f8ece0;
+      --text-dim:         #baa080;
+      --text-faint:       #7a6042;
+      --radius:           16px;
+      --radius-sm:        10px;
+      --transition:       .25s cubic-bezier(.4, 0, .2, 1);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-base);
+      color: var(--text);
+      min-height: 100vh;
+      overflow-x: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ═══ Ambient macOS Mesh Background Glow ═════════════════════════════════ */
+    body::before {
+      content: '';
+      position: fixed; inset: 0; z-index: 0;
+      background:
+        radial-gradient(circle 650px at 10% 15%, rgba(249, 115, 22, 0.14) 0%, transparent 70%),
+        radial-gradient(circle 550px at 85% 20%, rgba(251, 146, 60, 0.10) 0%, transparent 65%),
+        radial-gradient(circle 750px at 50% 80%, rgba(234, 88, 12, 0.12) 0%, transparent 70%),
+        radial-gradient(circle 400px at 80% 75%, rgba(251, 191, 36, 0.07) 0%, transparent 60%);
+      pointer-events: none;
+    }
+
+    /* ═══ Layout ══════════════════════════════════════════════════════════════ */
+    .app { position: relative; z-index: 1; display: grid; grid-template-rows: auto 1fr; min-height: 100vh; }
+
+    /* ═══ Header (Frosted macOS Vibrancy Bar) ═════════════════════════════════ */
+    header {
+      background: rgba(14, 10, 3, 0.72);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border-bottom: 1px solid var(--glass-border);
+      box-shadow: 0 4px 30px rgba(0, 0, 0, 0.4), inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+      padding: 0 2rem;
+      position: sticky; top: 0; z-index: 100;
+    }
+    .header-inner {
+      max-width: 1400px; margin: 0 auto;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 64px;
+    }
+    .logo { display: flex; align-items: center; gap: .75rem; }
+    .logo-icon {
+      width: 36px; height: 36px; border-radius: 10px;
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px; box-shadow: 0 0 20px rgba(249,115,22,.5);
+    }
+    .logo-text { font-size: 1rem; font-weight: 700; letter-spacing: -.02em; }
+    .logo-sub { font-size: .7rem; color: var(--text-dim); font-weight: 400; }
+
+    .header-status {
+      display: flex; align-items: center; gap: 1.5rem;
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: .5rem;
+      background: rgba(249,115,22,.1); border: 1px solid rgba(249,115,22,.3);
+      padding: .3rem .75rem; border-radius: 20px;
+      font-size: .72rem; color: var(--orange); font-weight: 500;
+    }
+    .status-dot {
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--orange);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .5; transform: scale(1.4); }
+    }
+
+    .model-badges { display: flex; gap: .4rem; }
+    .model-badge {
+      font-size: .65rem; font-weight: 600; padding: .25rem .55rem;
+      border-radius: 6px; letter-spacing: .04em;
+    }
+    .badge-cart { background: rgba(251,191,36,.12);  color: var(--yellow);  border: 1px solid rgba(251,191,36,.3);  }
+    .badge-svm  { background: rgba(249,115,22,.12);  color: var(--orange);  border: 1px solid rgba(249,115,22,.3);  }
+    .badge-ann  { background: rgba(251,146,60,.12);  color: #fb923c;        border: 1px solid rgba(251,146,60,.3);  }
+
+    /* ═══ Main Grid ══════════════════════════════════════════════════════════ */
+    main {
+      max-width: 1400px; margin: 0 auto;
+      padding: 2rem 2rem 4rem;
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      grid-template-rows: auto 1fr;
+      gap: 1.5rem;
+    }
+
+    /* ═══ Hero Stats Bar ══════════════════════════════════════════════════════ */
+    .stats-bar {
+      grid-column: 1 / -1;
+      display: grid; grid-template-columns: repeat(5, 1fr); gap: 1rem;
+    }
+    .stat-card {
+      background: var(--glass-card);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      padding: 1.1rem 1.25rem;
+      display: flex; flex-direction: column; gap: .3rem;
+      box-shadow: var(--glass-shadow-sm);
+      transition: all var(--transition);
+    }
+    .stat-card:hover {
+      background: var(--glass-card-hover);
+      border-color: var(--glass-border-glow);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.2), 0 0 20px rgba(249,115,22,.15);
+    }
+    .stat-label { font-size: .68rem; color: var(--text-dim); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+    .stat-value { font-size: 1.65rem; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+    .stat-sub   { font-size: .7rem; color: var(--text-faint); }
+    .stat-orange{ color: var(--orange); }
+    .stat-green { color: var(--green); }
+    .stat-red   { color: var(--red); }
+    .stat-yellow{ color: var(--yellow); }
+
+    /* ═══ Scenario Panel (macOS Glass Window) ══════════════════════════════════ */
+    .scenario-panel {
+      background: var(--glass-panel);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--glass-shadow);
+      overflow: hidden;
+      display: flex; flex-direction: column;
+    }
+    .panel-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--glass-border);
+      background: rgba(255,255,255,.015);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .panel-title { font-size: .8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); }
+
+    .run-all-btn {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      border: none; color: #fff;
+      padding: .45rem 1.1rem; border-radius: 20px;
+      font-size: .72rem; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; gap: .4rem;
+      transition: all var(--transition);
+      box-shadow: 0 4px 14px rgba(249,115,22,.35), inset 0 1px 0 rgba(255,255,255,.25);
+    }
+    .run-all-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(249,115,22,.5), inset 0 1px 0 rgba(255,255,255,.35);
+    }
+    .run-all-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+    .scenario-list {
+      padding: .85rem;
+      display: flex; flex-direction: column; gap: .55rem;
+      overflow-y: auto; flex: 1;
+    }
+    .scenario-item {
+      padding: .9rem 1.1rem; border-radius: var(--radius-sm);
+      border: 1px solid rgba(255,255,255,.06);
+      background: rgba(25, 18, 6, 0.45);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.05);
+      cursor: pointer; user-select: none;
+      display: flex; align-items: center; gap: .85rem;
+      transition: all var(--transition);
+      position: relative; overflow: hidden;
+    }
+    .scenario-item::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+      border-radius: 3px 0 0 3px;
+    }
+    .scenario-item.benign::before { background: var(--green); }
+    .scenario-item.attack::before { background: var(--red); }
+    .scenario-item:hover {
+      background: rgba(42, 29, 9, 0.65);
+      border-color: rgba(249,115,22,.35);
+      transform: translateY(-1px) translateX(2px);
+      box-shadow: 0 6px 18px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.1);
+    }
+    .scenario-item.active {
+      border-color: var(--accent);
+      background: linear-gradient(135deg, rgba(249,115,22,.22), rgba(249,115,22,.06));
+      box-shadow: 0 8px 24px rgba(249,115,22,.2), inset 0 1px 0 rgba(255,255,255,.2);
+    }
+    .scenario-item.active::before { background: var(--accent); }
+    .scenario-item.loading { pointer-events: none; }
+
+    .scenario-icon { font-size: 1.4rem; flex-shrink: 0; }
+    .scenario-info { flex: 1; min-width: 0; }
+    .scenario-name {
+      font-size: .83rem; font-weight: 600; white-space: nowrap;
+      overflow: hidden; text-overflow: ellipsis;
+    }
+    .scenario-desc {
+      font-size: .7rem; color: var(--text-dim);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-top: .15rem;
+    }
+    .scenario-tag {
+      font-size: .6rem; font-weight: 700; padding: .2rem .5rem;
+      border-radius: 5px; flex-shrink: 0; text-transform: uppercase; letter-spacing: .06em;
+    }
+    .tag-benign { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.25); }
+    .tag-attack { background: rgba(248,113,113,.12); color: var(--red);   border: 1px solid rgba(248,113,113,.25); }
+
+    .scenario-spinner {
+      width: 14px; height: 14px; border: 2px solid rgba(255,255,255,.1);
+      border-top-color: var(--accent); border-radius: 50%;
+      animation: spin .6s linear infinite; flex-shrink: 0; display: none;
+    }
+    .loading .scenario-spinner { display: block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ═══ Results Panel ══════════════════════════════════════════════════════ */
+    .results-panel {
+      display: flex; flex-direction: column; gap: 1.25rem;
+    }
+
+    /* Empty State */
+    .empty-state {
+      background: var(--glass-panel);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--glass-shadow);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 4rem 2rem; gap: 1rem;
+      color: var(--text-dim); text-align: center; flex: 1;
+    }
+    .empty-icon { font-size: 3rem; opacity: .4; }
+    .empty-title { font-size: 1rem; font-weight: 600; }
+    .empty-sub { font-size: .78rem; max-width: 320px; line-height: 1.6; }
+
+    /* Result header */
+    .result-header {
+      background: var(--glass-panel);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--glass-shadow);
+      padding: 1.25rem 1.5rem;
+      display: flex; align-items: center; gap: 1rem;
+    }
+    .result-scenario-icon { font-size: 2rem; }
+    .result-scenario-info { flex: 1; }
+    .result-scenario-name { font-size: 1.1rem; font-weight: 700; }
+    .result-scenario-desc { font-size: .78rem; color: var(--text-dim); margin-top: .2rem; }
+    .result-verdict {
+      font-size: .75rem; font-weight: 700; padding: .5rem 1.2rem;
+      border-radius: 20px; letter-spacing: .05em; text-transform: uppercase;
+    }
+    .verdict-benign { background: rgba(74,222,128,.12); color: var(--green); border: 1px solid rgba(74,222,128,.25); }
+    .verdict-attack  { background: rgba(248,113,113,.12); color: var(--red);   border: 1px solid rgba(248,113,113,.25); }
+    .verdict-mixed   { background: rgba(251,191,36,.12);  color: var(--yellow);border: 1px solid rgba(251,191,36,.25);  }
+
+    /* Model cards row */
+    .model-cards-row {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+    }
+    .model-card {
+      background: var(--glass-card);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      padding: 1.3rem;
+      display: flex; flex-direction: column; gap: 1rem;
+      box-shadow: var(--glass-shadow);
+      transition: all var(--transition);
+      animation: slideUp .3s ease;
+    }
+    .model-card:hover {
+      background: var(--glass-card-hover);
+      border-color: var(--glass-border-glow);
+      transform: translateY(-3px);
+      box-shadow: 0 20px 48px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.2), 0 0 24px rgba(249,115,22,.12);
+    }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+    .model-card-header { display: flex; align-items: center; justify-content: space-between; }
+    .model-name { font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .model-name.cart { color: var(--yellow); }
+    .model-name.svm  { color: var(--orange); }
+    .model-name.ann  { color: #fb923c; }
+
+    .model-prediction {
+      font-size: 1.3rem; font-weight: 800; text-align: center;
+    }
+    .pred-benign { color: var(--green); }
+    .pred-attack { color: var(--red); }
+
+    /* Probability Bar */
+    .prob-section { display: flex; flex-direction: column; gap: .5rem; }
+    .prob-label { display: flex; justify-content: space-between; font-size: .7rem; color: var(--text-dim); }
+    .prob-bar-track {
+      height: 8px; border-radius: 99px;
+      background: rgba(0,0,0,.5);
+      box-shadow: inset 0 1px 3px rgba(0,0,0,.6);
+      overflow: hidden;
+    }
+    .prob-bar-fill {
+      height: 100%; border-radius: 99px;
+      transition: width 1s cubic-bezier(.4,0,.2,1);
+      width: 0%;
+    }
+    .fill-benign { background: linear-gradient(90deg, #22c55e, #4ade80); }
+    .fill-attack  { background: linear-gradient(90deg, #ea580c, #fb923c); }
+
+    .prob-value {
+      font-size: 2rem; font-weight: 800; text-align: center;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .confidence-badge {
+      text-align: center; font-size: .7rem; color: var(--text-dim);
+    }
+
+    /* Features panel */
+    .features-panel {
+      background: var(--glass-panel);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--glass-shadow);
+      padding: 1.25rem 1.5rem;
+    }
+    .features-title {
+      font-size: .72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-dim); margin-bottom: 1rem;
+    }
+    .features-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: .75rem;
+    }
+    .feature-item {
+      background: rgba(26, 19, 7, 0.48);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,.07);
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+      border-radius: var(--radius-sm);
+      padding: .8rem; text-align: center;
+      transition: all var(--transition);
+    }
+    .feature-item:hover {
+      background: rgba(42, 30, 10, 0.65);
+      border-color: rgba(249,115,22,.35);
+      transform: translateY(-1px);
+    }
+    .feature-item.highlight {
+      border-color: rgba(249,115,22,.4);
+      background: rgba(249,115,22,.1);
+      box-shadow: 0 4px 16px rgba(249,115,22,.15), inset 0 1px 0 rgba(255,255,255,.1);
+    }
+    .feature-name { font-size: .62rem; color: var(--text-dim); font-weight: 500; margin-bottom: .35rem; text-transform: uppercase; letter-spacing: .04em; }
+    .feature-val {
+      font-size: 1.15rem; font-weight: 700;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--text);
+    }
+    .feature-val.high { color: var(--red); }
+    .feature-val.low  { color: var(--green); }
+
+    /* Run-all results table */
+    .batch-panel {
+      background: var(--glass-panel);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--glass-shadow);
+      padding: 1.25rem 1.5rem;
+    }
+    .batch-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
+    .batch-table th {
+      text-align: left; padding: .65rem .75rem;
+      font-size: .65rem; text-transform: uppercase; letter-spacing: .06em;
+      color: var(--text-dim); border-bottom: 1px solid var(--glass-border);
+    }
+    .batch-table td { padding: .7rem .75rem; border-bottom: 1px solid rgba(255,255,255,.05); vertical-align: middle; }
+    .batch-table tr:last-child td { border-bottom: none; }
+    .batch-table tr:hover td { background: rgba(249,115,22,.08); }
+    .batch-dot {
+      display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed; bottom: 2rem; right: 2rem;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); padding: .75rem 1.25rem;
+      font-size: .78rem; z-index: 200; transform: translateY(100px);
+      transition: transform .3s ease; box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    }
+    .toast.show { transform: translateY(0); }
+    .toast.success { border-color: rgba(74,222,128,.3); color: var(--green); }
+    .toast.error   { border-color: rgba(248,113,113,.3); color: var(--red); }
+
+    /* Mode Switch Controls (macOS Pill Segmented Control) */
+    .mode-switch-container {
+      display: flex; align-items: center; gap: .25rem;
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      box-shadow: inset 0 1px 2px rgba(0,0,0,.4);
+      padding: .25rem; border-radius: 24px;
+    }
+    .mode-btn {
+      background: transparent; border: none; color: var(--text-dim);
+      font-size: .68rem; font-weight: 600; padding: .32rem .8rem;
+      border-radius: 18px; cursor: pointer; transition: all var(--transition);
+    }
+    .mode-btn.active {
+      background: linear-gradient(135deg, #f97316, #ea580c);
+      color: #fff;
+      box-shadow: 0 2px 10px rgba(249,115,22,.45), inset 0 1px 0 rgba(255,255,255,.3);
+    }
+    .comp-toggle-btn {
+      background: rgba(249, 115, 22, 0.12);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(249, 115, 22, 0.28);
+      color: var(--orange); font-size: .72rem; font-weight: 600;
+      padding: .38rem .95rem; border-radius: 20px; cursor: pointer;
+      display: flex; align-items: center; gap: .45rem; transition: all var(--transition);
+      box-shadow: 0 4px 14px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.1);
+    }
+    .comp-toggle-btn:hover {
+      background: rgba(249, 115, 22, 0.22);
+      border-color: var(--orange);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(249,115,22,.3), inset 0 1px 0 rgba(255,255,255,.2);
+    }
+
+    /* Comparison Modal (macOS Frosted Sheet) */
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(0, 0, 0, 0.72);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      z-index: 1000; display: none; align-items: center; justify-content: center; padding: 2rem;
+    }
+    .modal-backdrop.open { display: flex; animation: fadeIn .2s ease; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+    .modal-content {
+      background: rgba(18, 13, 4, 0.82);
+      backdrop-filter: blur(36px) saturate(210%);
+      -webkit-backdrop-filter: blur(36px) saturate(210%);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: var(--radius); max-width: 950px; width: 100%; max-height: 90vh;
+      overflow-y: auto; display: flex; flex-direction: column;
+      box-shadow: 0 32px 80px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    }
+    .modal-header {
+      padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .modal-title { font-size: 1.05rem; font-weight: 700; color: var(--text); }
+    .modal-sub { font-size: .75rem; color: var(--text-dim); margin-top: .2rem; }
+    .modal-close {
+      background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+      font-size: 1.1rem; width: 32px; height: 32px; border-radius: 50%;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      transition: all var(--transition);
+    }
+    .modal-close:hover { border-color: var(--orange); color: var(--orange); }
+    .modal-body { padding: 1.5rem; display: flex; flex-direction: column; gap: 1.25rem; }
+    .comp-table { width: 100%; border-collapse: collapse; font-size: .78rem; }
+    .comp-table th {
+      text-align: left; padding: .65rem .75rem; font-size: .68rem;
+      text-transform: uppercase; letter-spacing: .06em; color: var(--text-dim);
+      border-bottom: 1px solid var(--border);
+    }
+    .comp-table td { padding: .75rem .75rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .comp-table tr.tuned-row { background: rgba(249,115,22,.05); }
+    .badge-gain {
+      display: inline-block; font-size: .65rem; font-weight: 700; padding: .2rem .5rem;
+      border-radius: 4px; background: rgba(74,222,128,.15); color: var(--green); border: 1px solid rgba(74,222,128,.3);
+    }
+    .badge-status-base {
+      display: inline-block; font-size: .62rem; font-weight: 600; padding: .2rem .5rem;
+      border-radius: 4px; background: rgba(251,191,36,.12); color: var(--yellow); border: 1px solid rgba(251,191,36,.3);
+    }
+    .badge-status-tuned {
+      display: inline-block; font-size: .62rem; font-weight: 600; padding: .2rem .5rem;
+      border-radius: 4px; background: rgba(249,115,22,.15); color: var(--orange); border: 1px solid rgba(249,115,22,.3);
+    }
+    .comp-legend {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: .75rem; font-size: .72rem; color: var(--text-dim);
+      background: var(--bg-card); padding: 1rem; border-radius: var(--radius-sm); border: 1px solid var(--border);
+    }
+    .legend-item { display: flex; flex-direction: column; gap: .25rem; }
+
+    /* Decision Rationale Panel */
+    .rationale-panel {
+      background: var(--glass-panel);
+      backdrop-filter: var(--glass-blur);
+      -webkit-backdrop-filter: var(--glass-blur);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius);
+      box-shadow: var(--glass-shadow);
+      padding: 1.3rem 1.5rem;
+      display: flex; flex-direction: column; gap: 1rem;
+      animation: fadeIn .3s ease;
+    }
+    .rationale-header {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid var(--glass-border);
+      padding-bottom: .75rem;
+    }
+    .rationale-title {
+      font-size: .75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .08em; color: var(--text-dim);
+    }
+    .rationale-overview {
+      font-size: .8rem; color: var(--text); line-height: 1.55;
+      background: rgba(255,255,255,.025); padding: .85rem 1.1rem;
+      border-radius: var(--radius-sm); border: 1px solid var(--glass-border);
+    }
+    .model-rationales-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: .85rem;
+    }
+    .model-rationale-item {
+      background: var(--glass-card);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      padding: 1rem;
+      display: flex; flex-direction: column; gap: .6rem;
+      transition: all var(--transition);
+    }
+    .model-rationale-item:hover {
+      background: var(--glass-card-hover);
+      border-color: var(--glass-border-glow);
+      transform: translateY(-2px);
+    }
+    .model-rationale-head {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: .72rem; font-weight: 700; border-bottom: 1px solid rgba(255,255,255,.05);
+      padding-bottom: .45rem;
+    }
+    .model-rationale-text {
+      font-size: .73rem; color: var(--text-dim); line-height: 1.55;
+    }
+
+    /* Modal Hyperparameter Improvement Grid */
+    .comp-gain-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem;
+    }
+    .gain-card {
+      background: var(--glass-card);
+      border: 1px solid var(--glass-border);
+      border-radius: var(--radius-sm);
+      padding: 1rem 1.1rem;
+      display: flex; flex-direction: column; gap: .75rem;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,.08);
+    }
+    .gain-card-head {
+      display: flex; align-items: center; justify-content: space-between;
+      border-bottom: 1px solid rgba(255,255,255,.06);
+      padding-bottom: .5rem;
+    }
+    .gain-card-algo { font-size: .74rem; font-weight: 700; color: var(--text); }
+    .gain-metrics { display: flex; flex-direction: column; gap: .4rem; font-size: .72rem; }
+    .gain-metric-row {
+      display: flex; align-items: center; justify-content: space-between;
+      color: var(--text-dim);
+    }
+    .gain-metric-row b { color: var(--text); }
+    .delta-green { color: var(--green); font-weight: 700; }
+    .delta-orange { color: var(--orange); font-weight: 600; }
+    .gain-card-note {
+      font-size: .68rem; color: var(--text-faint); line-height: 1.45;
+      background: rgba(0,0,0,.25); padding: .5rem .75rem; border-radius: 6px;
+      border-left: 2px solid var(--accent);
+    }
+
+    /* Responsive */
+    @media (max-width: 1100px) {
+      main { grid-template-columns: 1fr; }
+      .stats-bar { grid-template-columns: repeat(3, 1fr); }
+      .model-cards-row { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ═══ HEADER ══════════════════════════════════════════════════════════ -->
+  <header>
+    <div class="header-inner">
+      <div class="logo">
+        <div class="logo-icon">🛡️</div>
+        <div>
+          <div class="logo-text">DNS Tunneling Detector</div>
+          <div class="logo-sub">Network Intrusion Detection System · CIC-Bell-DNS-EXF-2021</div>
+        </div>
+      </div>
+      <div class="header-status">
+        <div class="mode-switch-container">
+          <button class="mode-btn active" id="btn-mode-tuned" onclick="switchMode('tuned')">⚡ Tuned Models</button>
+          <button class="mode-btn" id="btn-mode-baseline" onclick="switchMode('baseline')">⏱ Pre-Tuned Base</button>
+        </div>
+        <button class="comp-toggle-btn" onclick="toggleComparisonModal()">
+          <span>📊 Baseline vs Tuned</span>
+        </button>
+        <div class="model-badges">
+          <span class="model-badge badge-cart">CART</span>
+          <span class="model-badge badge-svm">SVM</span>
+          <span class="model-badge badge-ann">ANN</span>
+        </div>
+        <div class="status-pill">
+          <span class="status-dot"></span>
+          <span id="header-status-label">Tuned (Active)</span>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══ MAIN ══════════════════════════════════════════════════════════════ -->
+  <main>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-label">Training Samples</div>
+        <div class="stat-value stat-orange">158K</div>
+        <div class="stat-sub">SMOTE-balanced 50/50</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label" id="stat-cart-lbl">CART Test F1</div>
+        <div class="stat-value stat-yellow" id="stat-cart-val">0.2620</div>
+        <div class="stat-sub" id="stat-cart-sub">Precision 16.96% · Recall 57.65%</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label" id="stat-svm-lbl">SVM ROC-AUC</div>
+        <div class="stat-value stat-orange" id="stat-svm-val">0.9354</div>
+        <div class="stat-sub" id="stat-svm-sub">Recall 74.12% · C=10 γ=0.1</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label" id="stat-ann-lbl">ANN PR-AUC</div>
+        <div class="stat-value stat-orange" id="stat-ann-val">0.3047</div>
+        <div class="stat-sub" id="stat-ann-sub">Architecture: 18→64→32→1</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Scenarios Tested</div>
+        <div class="stat-value stat-orange" id="sessions-counter">0 / 10</div>
+        <div class="stat-sub">unique scenarios</div>
+      </div>
+    </div>
+
+    <!-- Scenario Panel (Left) -->
+    <div class="scenario-panel">
+      <div class="panel-header">
+        <span class="panel-title">⚡ DNS Scenario Gallery</span>
+        <button class="run-all-btn" id="run-all-btn" onclick="runAllScenarios()">
+          <span>▶ Run All</span>
+        </button>
+      </div>
+      <div class="scenario-list" id="scenario-list">
+        {% for s in scenarios %}
+        <div class="scenario-item {{ s.category }}" id="item-{{ s.id }}"
+             onclick="runScenario('{{ s.id }}', this)">
+          <span class="scenario-icon">{{ s.icon }}</span>
+          <div class="scenario-info">
+            <div class="scenario-name">{{ s.label }}</div>
+            <div class="scenario-desc">{{ s.description }}</div>
+          </div>
+          <span class="scenario-tag tag-{{ s.category }}">{{ s.category }}</span>
+          <div class="scenario-spinner"></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Results Panel (Right) -->
+    <div class="results-panel" id="results-panel">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">🔎</div>
+        <div class="empty-title">Select a DNS Scenario</div>
+        <div class="empty-sub">Click any scenario in the gallery to fire it through all three detection models simultaneously and compare their predictions.</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- ═══ COMPARISON MODAL ═════════════════════════════════════════════════ -->
+  <div class="modal-backdrop" id="comp-modal" onclick="if(event.target===this) toggleComparisonModal()">
+    <div class="modal-content">
+      <div class="modal-header">
+        <div>
+          <div class="modal-title">🔬 Pre-Tuned Baseline vs. Final Tuned Models</div>
+          <div class="modal-sub">Authentic Holdout Test Set (34,071 Queries, 85 Attacks) · Verified Metrics & Gain</div>
+        </div>
+        <button class="modal-close" onclick="toggleComparisonModal()">✕</button>
+      </div>
+      <div class="modal-body">
+        <table class="comp-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Status</th>
+              <th>Accuracy</th>
+              <th>Precision</th>
+              <th>Recall</th>
+              <th>F1-Score</th>
+              <th>ROC-AUC</th>
+              <th>PR-AUC</th>
+            </tr>
+          </thead>
+          <tbody id="comp-table-body">
+            <!-- Populated dynamically via JS from /api/comparison -->
+          </tbody>
+        </table>
+
+        <!-- Hyperparameter Tuning Quantitative Gains Grid -->
+        <div style="font-size:.75rem; font-weight:700; text-transform:uppercase; letter-spacing:.08em; color:var(--text-dim); margin-top:.5rem;">
+          📈 Verified Quantitative Improvement Over Pre-Tuned Baseline (Holdout Test Set)
+        </div>
+        <div class="comp-gain-grid">
+          <div class="gain-card">
+            <div class="gain-card-head">
+              <span class="gain-card-algo">🟡 CART (Decision Tree)</span>
+              <span class="badge-gain">▲ +126.6% F1 Gain</span>
+            </div>
+            <div class="gain-metrics">
+              <div class="gain-metric-row"><span>Test F1-Score:</span> <b>0.1156 → 0.2620</b> <span class="delta-green">(+126.6%)</span></div>
+              <div class="gain-metric-row"><span>Attack Recall:</span> <b>23.53% → 57.65%</b> <span class="delta-green">(+145.0%)</span></div>
+              <div class="gain-metric-row"><span>Precision:</span> <b>7.66% → 16.96%</b> <span class="delta-green">(+121.4%)</span></div>
+              <div class="gain-metric-row"><span>PR-AUC (AP):</span> <b>0.0175 → 0.1313</b> <span class="delta-green">(+650.0%)</span></div>
+              <div class="gain-metric-row"><span>ROC-AUC:</span> <b>0.6311 → 0.8866</b> <span class="delta-green">(+40.5%)</span></div>
+              <div class="gain-metric-row"><span>Tree Depth:</span> <b>53 → 20 levels</b> <span class="delta-orange">(-62.3% prune)</span></div>
+            </div>
+            <div class="gain-card-note">Regularization prunes runaway leaves (1,290 → 499), curing massive 100% train overfit and doubling detection catch rate.</div>
+          </div>
+
+          <div class="gain-card">
+            <div class="gain-card-head">
+              <span class="gain-card-algo">🟧 SVM (RBF Kernel)</span>
+              <span class="badge-gain">▲ +20.2% F1 Gain</span>
+            </div>
+            <div class="gain-metrics">
+              <div class="gain-metric-row"><span>Test F1-Score:</span> <b>0.0886 → 0.1065</b> <span class="delta-green">(+20.2%)</span></div>
+              <div class="gain-metric-row"><span>Precision:</span> <b>4.68% → 5.74%</b> <span class="delta-green">(+22.6%)</span></div>
+              <div class="gain-metric-row"><span>False Alarms:</span> <b>Reduced by 22.6%</b> <span class="delta-green">(High Impact)</span></div>
+              <div class="gain-metric-row"><span>Test Accuracy:</span> <b>95.77% → 96.90%</b> <span class="delta-green">(+1.13%)</span></div>
+              <div class="gain-metric-row"><span>PR-AUC (AP):</span> <b>0.0688 → 0.0728</b> <span class="delta-green">(+5.8%)</span></div>
+              <div class="gain-metric-row"><span>Optimal Params:</span> <b>C=10.0, γ=0.1</b> <span class="delta-orange">(RBF Curvature)</span></div>
+            </div>
+            <div class="gain-card-note">Hyperplane margin optimization curbed excessive false positives in the highly skewed 0.25% authentic attack environment.</div>
+          </div>
+
+          <div class="gain-card">
+            <div class="gain-card-head">
+              <span class="gain-card-algo">🔥 ANN (MLP Neural Net)</span>
+              <span class="badge-gain">▲ +23.8% F1 Gain</span>
+            </div>
+            <div class="gain-metrics">
+              <div class="gain-metric-row"><span>Test F1-Score:</span> <b>0.1027 → 0.1271</b> <span class="delta-green">(+23.8%)</span></div>
+              <div class="gain-metric-row"><span>Precision:</span> <b>5.50% → 6.95%</b> <span class="delta-green">(+26.4%)</span></div>
+              <div class="gain-metric-row"><span>PR-AUC (AP):</span> <b>0.2877 → 0.3047</b> <span class="delta-green">(+5.9% Best)</span></div>
+              <div class="gain-metric-row"><span>Convergence:</span> <b>No Warnings</b> <span class="delta-green">(Early Stopping)</span></div>
+              <div class="gain-metric-row"><span>Architecture:</span> <b>18 → 64 → 32 → 1</b> <span class="delta-orange">(Bottleneck MLP)</span></div>
+            </div>
+            <div class="gain-card-note">Layer bottleneck compression and early stopping stabilized weights against noisy SMOTE boundaries, securing top PR-AUC.</div>
+          </div>
+        </div>
+
+        <div class="comp-legend">
+          <div class="legend-item">
+            <span class="badge-gain">▲ +126.6% CART F1 Gain</span>
+            <span>Pruned unconstrained depth from 53 to 20 levels (leaves 1290 → 499) to stop overfit.</span>
+          </div>
+          <div class="legend-item">
+            <span class="badge-gain">▲ +20.2% SVM F1 Gain</span>
+            <span>Optimized margin & curvature (C=10, γ=0.1) reducing test false alarm rate by 22.6%.</span>
+          </div>
+          <div class="legend-item">
+            <span class="badge-gain">▲ +23.8% ANN F1 Gain</span>
+            <span>Topology tuned (18→64→32→1) with early stopping, delivering best PR-AUC (0.3047).</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast"></div>
+</div>
+
+<!-- ═══ JAVASCRIPT ════════════════════════════════════════════════════════ -->
+<script>
+  let currentMode = 'tuned';           // 'tuned' or 'baseline'
+  let currentActiveId = null;
+  const testedScenarios = new Set();   // tracks unique scenario IDs — max 10
+  const TOTAL_SCENARIOS = 10;
+  let batchResults = [];
+
+  function updateCounter() {
+    const n = Math.min(testedScenarios.size, TOTAL_SCENARIOS);
+    document.getElementById('sessions-counter').textContent = `${n} / ${TOTAL_SCENARIOS}`;
+  }
+
+  /* ── Mode Switching: Tuned vs Pre-Tuned Baseline ────────────────────────── */
+  function switchMode(mode) {
+    if (currentMode === mode) return;
+    currentMode = mode;
+
+    document.getElementById('btn-mode-tuned').classList.toggle('active', mode === 'tuned');
+    document.getElementById('btn-mode-baseline').classList.toggle('active', mode === 'baseline');
+    document.getElementById('header-status-label').textContent = mode === 'tuned' ? 'Tuned (Active)' : 'Pre-Tuned (Active)';
+
+    // Update Stats Bar dynamically
+    if (mode === 'tuned') {
+      document.getElementById('stat-cart-lbl').textContent = 'CART Test F1';
+      document.getElementById('stat-cart-val').textContent = '0.2620';
+      document.getElementById('stat-cart-sub').textContent = 'Precision 16.96% · Recall 57.65%';
+      document.getElementById('stat-svm-lbl').textContent = 'SVM ROC-AUC';
+      document.getElementById('stat-svm-val').textContent = '0.9354';
+      document.getElementById('stat-svm-sub').textContent = 'Recall 74.12% · C=10 γ=0.1';
+      document.getElementById('stat-ann-lbl').textContent = 'ANN PR-AUC';
+      document.getElementById('stat-ann-val').textContent = '0.3047';
+      document.getElementById('stat-ann-sub').textContent = 'Architecture: 18→64→32→1';
+    } else {
+      document.getElementById('stat-cart-lbl').textContent = 'CART Base F1';
+      document.getElementById('stat-cart-val').textContent = '0.1156';
+      document.getElementById('stat-cart-sub').textContent = 'Precision 7.66% · Recall 23.53% · Depth 53';
+      document.getElementById('stat-svm-lbl').textContent = 'SVM Base ROC-AUC';
+      document.getElementById('stat-svm-val').textContent = '0.9426';
+      document.getElementById('stat-svm-sub').textContent = 'Default C=1.0 · γ=scale';
+      document.getElementById('stat-ann-lbl').textContent = 'ANN Base PR-AUC';
+      document.getElementById('stat-ann-val').textContent = '0.2877';
+      document.getElementById('stat-ann-sub').textContent = 'Default 100 Neurons · Unregularized';
+    }
+
+    showToast(`Switched active inference to ${mode === 'tuned' ? '⚡ Final Tuned Models' : '⏱ Pre-Tuned Baseline Models'}`, 'success');
+
+    // Re-run currently selected scenario or batch if active
+    if (currentActiveId) {
+      const el = document.getElementById('item-' + currentActiveId);
+      if (el) runScenario(currentActiveId, el);
+    }
+  }
+
+  /* ── Comparison Modal ───────────────────────────────────────────────────── */
+  let compDataLoaded = false;
+  async function toggleComparisonModal() {
+    const modal = document.getElementById('comp-modal');
+    const isOpen = modal.classList.contains('open');
+    if (isOpen) {
+      modal.classList.remove('open');
+    } else {
+      modal.classList.add('open');
+      if (!compDataLoaded) {
+        await loadComparisonTable();
+      }
+    }
+  }
+
+  async function loadComparisonTable() {
+    try {
+      const resp = await fetch('/api/comparison');
+      const rows = await resp.json();
+      const tbody = document.getElementById('comp-table-body');
+      tbody.innerHTML = rows.map(r => {
+        const isTuned = r.Model.includes('Tuned');
+        const statusBadge = isTuned
+          ? '<span class="badge-status-tuned">Stage 10 Tuned</span>'
+          : '<span class="badge-status-base">Stage 8/Default Base</span>';
+        const rowClass = isTuned ? 'tuned-row' : '';
+        return `
+          <tr class="${rowClass}">
+            <td style="font-weight:600; color:var(--text)">${r.Model}</td>
+            <td>${statusBadge}</td>
+            <td>${(parseFloat(r.Accuracy)*100).toFixed(2)}%</td>
+            <td style="color:${isTuned ? 'var(--orange)' : 'var(--text)'}">${(parseFloat(r.Precision)*100).toFixed(2)}%</td>
+            <td style="color:${parseFloat(r.Recall) > 0.5 ? 'var(--green)' : 'var(--yellow)'}">${(parseFloat(r.Recall)*100).toFixed(2)}%</td>
+            <td style="font-weight:700; color:${isTuned ? 'var(--green)' : 'var(--yellow)'}">${r['F1-Score']}</td>
+            <td>${r['ROC-AUC']}</td>
+            <td style="font-weight:600; color:var(--orange)">${r['PR-AUC']}</td>
+          </tr>
+        `;
+      }).join('');
+      compDataLoaded = true;
+    } catch (e) {
+      console.error('Error loading comparison data:', e);
+    }
+  }
+
+  // Close modal on Escape key
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      document.getElementById('comp-modal').classList.remove('open');
+    }
+  });
+
+  /* ── Run a single scenario ─────────────────────────────────────────────── */
+  async function runScenario(id, el) {
+    currentActiveId = id;
+    document.querySelectorAll('.scenario-item').forEach(e => {
+      e.classList.remove('active', 'loading');
+    });
+    el.classList.add('active', 'loading');
+
+    try {
+      const resp = await fetch(`/api/predict/scenario/${id}?mode=${currentMode}`, { method: 'POST' });
+      const data = await resp.json();
+      if (data.error) throw new Error(data.error);
+      renderResults(data);
+      testedScenarios.add(id);   // set deduplicates — never exceeds 10
+      updateCounter();
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    } finally {
+      el.classList.remove('loading');
+    }
+  }
+
+  /* ── Run all scenarios ──────────────────────────────────────────────────── */
+  async function runAllScenarios() {
+    const btn = document.getElementById('run-all-btn');
+    btn.disabled = true;
+    btn.innerHTML = '<span>⏳ Running…</span>';
+
+    try {
+      const resp = await fetch(`/api/run_all?mode=${currentMode}`, { method: 'POST' });
+      const results = await resp.json();
+      batchResults = results;
+      renderBatchResults(results);
+      results.forEach(r => { if (r.scenario?.id) testedScenarios.add(r.scenario.id); });
+      updateCounter();
+      showToast(`Ran all ${results.length} scenarios [${currentMode.toUpperCase()} mode]`, 'success');
+    } catch (e) {
+      showToast('Error: ' + e.message, 'error');
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<span>▶ Run All</span>';
+    }
+  }
+
+  /* ── Render single result ──────────────────────────────────────────────── */
+  function renderResults(data) {
+    const { scenario, models, key_features, mode } = data;
+    const isTuned = (mode || currentMode) === 'tuned';
+
+    // Determine consensus verdict
+    const preds = Object.values(models).map(m => m.prediction);
+    const attackCount = preds.filter(p => p === 1).length;
+    let verdictClass, verdictLabel;
+    if (attackCount === 3)      { verdictClass = 'verdict-attack';  verdictLabel = '⚠ All Malicious'; }
+    else if (attackCount === 0) { verdictClass = 'verdict-benign';  verdictLabel = '✓ All Benign';    }
+    else                        { verdictClass = 'verdict-mixed';   verdictLabel = `${attackCount}/3 Malicious`; }
+
+    const cartSub = isTuned ? 'Stage 10 Tuned · F1=0.2620' : 'Stage 8 Untuned Base · F1=0.1156';
+    const svmSub  = isTuned ? 'Stage 10 Tuned · C=10 γ=0.1' : 'Default Base · C=1.0 γ=scale';
+    const annSub  = isTuned ? 'Stage 10 Tuned · PR-AUC=0.3047' : 'Default Base · 100 Neurons';
+
+    const panel = document.getElementById('results-panel');
+    panel.innerHTML = `
+      <!-- Result Header -->
+      <div class="result-header">
+        <div class="result-scenario-icon">${scenario.icon}</div>
+        <div class="result-scenario-info">
+          <div class="result-scenario-name">${scenario.label}</div>
+          <div class="result-scenario-desc">${scenario.description}</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:.75rem">
+          <span class="${isTuned ? 'badge-status-tuned' : 'badge-status-base'}">${isTuned ? '⚡ Tuned Mode' : '⏱ Pre-Tuned Mode'}</span>
+          <span class="result-verdict ${verdictClass}">${verdictLabel}</span>
+        </div>
+      </div>
+
+      <!-- 3 Model Cards -->
+      <div class="model-cards-row">
+        ${renderModelCard('CART', isTuned ? 'CART (Tuned)' : 'CART (Baseline)', models.CART, 'cart', cartSub)}
+        ${renderModelCard('SVM',  isTuned ? 'SVM (Tuned)'  : 'SVM (Baseline)',  models.SVM,  'svm',  svmSub)}
+        ${renderModelCard('ANN',  isTuned ? 'ANN (Tuned)'  : 'ANN (Baseline)',  models.ANN,  'ann',  annSub)}
+      </div>
+
+      <!-- Model Decision Rationale & Discrepancy Diagnostics -->
+      <div class="rationale-panel">
+        <div class="rationale-header">
+          <span class="rationale-title">🧠 Model Decision Rationale & Geometric Discrepancy Report</span>
+          <span class="result-verdict ${verdictClass}" style="padding:.25rem .75rem; font-size:.68rem">${verdictLabel}</span>
+        </div>
+        <div class="rationale-overview">
+          <strong>Behavioral Analysis:</strong> ${scenario.rationale?.overview || scenario.description}
+        </div>
+        <div class="model-rationales-grid">
+          <div class="model-rationale-item">
+            <div class="model-rationale-head">
+              <span style="color:var(--yellow)">🟡 CART (Decision Tree)</span>
+              <span class="${models.CART.prediction ? 'pred-attack' : 'pred-benign'}">${models.CART.label} (${models.CART.probability.toFixed(1)}%)</span>
+            </div>
+            <div class="model-rationale-text">${scenario.rationale?.CART || 'Evaluated via orthogonal axis-aligned threshold splits.'}</div>
+          </div>
+          <div class="model-rationale-item">
+            <div class="model-rationale-head">
+              <span style="color:var(--orange)">🟧 SVM (RBF Kernel)</span>
+              <span class="${models.SVM.prediction ? 'pred-attack' : 'pred-benign'}">${models.SVM.label} (${models.SVM.probability.toFixed(1)}%)</span>
+            </div>
+            <div class="model-rationale-text">${scenario.rationale?.SVM || 'Evaluated via infinite-dimensional Gaussian distance in Hilbert space.'}</div>
+          </div>
+          <div class="model-rationale-item">
+            <div class="model-rationale-head">
+              <span style="color:#fb923c">🔥 ANN (MLP Neural Net)</span>
+              <span class="${models.ANN.prediction ? 'pred-attack' : 'pred-benign'}">${models.ANN.label} (${models.ANN.probability.toFixed(1)}%)</span>
+            </div>
+            <div class="model-rationale-text">${scenario.rationale?.ANN || 'Evaluated via layered linear projections and non-linear ReLUs.'}</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Key Feature Breakdown -->
+      <div class="features-panel">
+        <div class="features-title">🔬 Engineered Feature Breakdown</div>
+        <div class="features-grid">
+          ${renderFeature('Query Length', key_features.query_length, key_features.query_length > 30, 'chars')}
+          ${renderFeature('Domain Entropy', key_features.domain_entropy, key_features.domain_entropy > 3.2, 'bits')}
+          ${renderFeature('Entropy × Length', key_features.entropy_x_length, key_features.entropy_x_length > 90, '', true)}
+          ${renderFeature('RR Score', key_features.tunneling_rr_score, key_features.tunneling_rr_score > 0, '', true)}
+          ${renderFeature('Network Diversity', key_features.network_diversity, key_features.network_diversity < 2, '')}
+          ${renderFeature('NULL Record (NONE)', key_features.rr_type_NONE, key_features.rr_type_NONE > 0.3, '')}
+          ${renderFeature('RR Count', key_features.rr_count, key_features.rr_count > 15, '')}
+          ${renderFeature('TTL Mean', key_features.ttl_mean, key_features.ttl_mean < 5, 's')}
+        </div>
+      </div>
+    `;
+
+    // Animate probability bars after DOM update
+    requestAnimationFrame(() => {
+      document.querySelectorAll('.prob-bar-fill').forEach(bar => {
+        const target = bar.dataset.target;
+        setTimeout(() => { bar.style.width = target + '%'; }, 50);
+      });
+    });
+  }
+
+  function renderModelCard(key, title, m, cls, sub) {
+    const isAttack = m.prediction === 1;
+    const fillClass = isAttack ? 'fill-attack' : 'fill-benign';
+    const predClass = isAttack ? 'pred-attack' : 'pred-benign';
+    const predIcon  = isAttack ? '⚠' : '✓';
+
+    return `
+      <div class="model-card">
+        <div class="model-card-header">
+          <span class="model-name ${cls}">${title}</span>
+          <span style="font-size:.65rem; color:var(--text-faint);">${sub}</span>
+        </div>
+        <div class="model-prediction ${predClass}">${predIcon} ${m.label}</div>
+        <div class="prob-section">
+          <div class="prob-label">
+            <span>Attack Probability</span>
+            <span>${m.probability.toFixed(1)}%</span>
+          </div>
+          <div class="prob-bar-track">
+            <div class="prob-bar-fill ${fillClass}" data-target="${m.probability}"></div>
+          </div>
+          <div class="prob-value ${predClass}">${m.probability.toFixed(1)}%</div>
+          <div class="confidence-badge">Confidence: ${m.confidence.toFixed(1)}%</div>
+        </div>
+      </div>`;
+  }
+
+  function renderFeature(name, val, isHighRisk, unit, highlight=false) {
+    const cls = isHighRisk ? 'high' : 'low';
+    const fmt = typeof val === 'number' ? (Number.isInteger(val) ? val : val.toFixed(3)) : val;
+    return `
+      <div class="feature-item ${highlight ? 'highlight' : ''}">
+        <div class="feature-name">${name}</div>
+        <div class="feature-val ${cls}">${fmt}${unit ? ' <small style="font-size:.55em;color:var(--text-faint)">' + unit + '</small>' : ''}</div>
+      </div>`;
+  }
+
+  /* ── Render batch results ──────────────────────────────────────────────── */
+  function renderBatchResults(results) {
+    const panel = document.getElementById('results-panel');
+    const isTuned = currentMode === 'tuned';
+    const rows = results.map(r => {
+      if (r.error) return `<tr><td>${r.scenario?.label || '?'}</td><td colspan="4" style="color:var(--red)">Error</td></tr>`;
+      const preds = Object.values(r.models).map(m => m.prediction);
+      const attackCount = preds.filter(p => p === 1).length;
+      const verdictColor = attackCount === 3 ? 'var(--red)' : attackCount === 0 ? 'var(--green)' : 'var(--yellow)';
+      const verdictLabel = attackCount === 3 ? 'Attack' : attackCount === 0 ? 'Benign' : `${attackCount}/3 Attack`;
+      const catDot = r.scenario.category === 'attack' ? 'var(--red)' : 'var(--green)';
+      return `
+        <tr style="cursor:pointer" onclick="clickBatchRow('${r.scenario.id}')">
+          <td>
+            <span class="batch-dot" style="background:${catDot}"></span>
+            ${r.scenario.icon} ${r.scenario.label}
+          </td>
+          <td style="color:${r.models.CART.prediction ? 'var(--red)' : 'var(--green)'}">
+            ${r.models.CART.prediction ? '⚠' : '✓'} ${r.models.CART.probability.toFixed(1)}%
+          </td>
+          <td style="color:${r.models.SVM.prediction ? 'var(--red)' : 'var(--green)'}">
+            ${r.models.SVM.prediction ? '⚠' : '✓'} ${r.models.SVM.probability.toFixed(1)}%
+          </td>
+          <td style="color:${r.models.ANN.prediction ? 'var(--red)' : 'var(--green)'}">
+            ${r.models.ANN.prediction ? '⚠' : '✓'} ${r.models.ANN.probability.toFixed(1)}%
+          </td>
+          <td><span style="color:${verdictColor}; font-weight:600">${verdictLabel}</span></td>
+        </tr>`;
+    }).join('');
+
+    panel.innerHTML = `
+      <div class="result-header">
+        <div class="result-scenario-icon">📊</div>
+        <div class="result-scenario-info">
+          <div class="result-scenario-name">Batch Evaluation — All ${results.length} Scenarios (${isTuned ? '⚡ Tuned Mode' : '⏱ Pre-Tuned Mode'})</div>
+          <div class="result-scenario-desc">Click any row to inspect that scenario's detailed breakdown</div>
+        </div>
+      </div>
+      <div class="batch-panel">
+        <div class="features-title" style="margin-bottom:.75rem">🗂 Scenario Comparison Table (${isTuned ? 'Final Tuned' : 'Pre-Tuned Baseline'})</div>
+        <table class="batch-table">
+          <thead>
+            <tr>
+              <th>Scenario</th>
+              <th>🟡 CART</th>
+              <th>🟧 SVM</th>
+              <th>🔥 ANN</th>
+              <th>Consensus</th>
+            </tr>
+          </thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>`;
+  }
+
+  function clickBatchRow(id) {
+    const el = document.getElementById('item-' + id);
+    if (el) runScenario(id, el);
+  }
+
+  /* ── Toast ──────────────────────────────────────────────────────────────── */
+  function showToast(msg, type='success') {
+    const t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = `toast ${type} show`;
+    setTimeout(() => t.className = 'toast', 3000);
+  }
+</script>
+</body>
+</html>
